@@ -4,71 +4,78 @@ import pandas as pd
 import time
 import random
 
-st.set_page_config(page_title="PRO Crypto v2.7", layout="wide")
+st.set_page_config(page_title="Crypto Intellect Ultimate", layout="wide")
 
-def fetch_data_safe():
-    # Список альтернативних дзеркал
-    urls = [
-        "https://api1.binance.com/api/v3/ticker/24hr",
-        "https://api2.binance.com/api/v3/ticker/24hr",
-        "https://api3.binance.com/api/v3/ticker/24hr"
-    ]
-    url = random.choice(urls)
-    
+# Функція з "м'яким" запитом
+def fetch_data_ultra_safe():
+    urls = ["https://api1.binance.com/api/v3/ticker/24hr", "https://api2.binance.com/api/v3/ticker/24hr"]
     try:
-        # Додаємо випадковий параметр, щоб обійти кешування та бан
-        params = {'_cb': random.randint(1, 999999)}
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Cache-Control': 'no-cache'
-        }
-        
-        response = requests.get(url, params=params, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            df = pd.DataFrame(response.json())
+        # Додаємо випадковий хеш, щоб запит не кешувався
+        r = requests.get(random.choice(urls), params={'refresh': random.random()}, timeout=10)
+        if r.status_code == 200:
+            df = pd.DataFrame(r.json())
             df = df[df['symbol'].endswith('USDT')]
-            for col in ['lastPrice', 'priceChangePercent', 'quoteVolume', 'highPrice', 'lowPrice']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
             return df
         return None
     except:
         return None
 
-# --- ІНТЕРФЕЙС ---
-st.sidebar.title("💎 PRO Control")
-search = st.sidebar.text_input("🔍 Пошук", "").upper()
+# --- САЙДБАР ---
+st.sidebar.title("🚀 Налаштування PRO")
 
-df = fetch_data_safe()
+# Ручне введення монет (якщо API лежить)
+st.sidebar.subheader("📋 Мій Список (Watchlist)")
+manual_list = st.sidebar.text_area("Введіть тикери через кому", "BTC,ETH,SOL,XRP,DOGE,PEPE").upper().replace(" ", "")
+my_coins = [c + "USDT" if not c.endswith("USDT") else c for c in manual_list.split(",")]
 
-if df is not None and not df.empty:
-    # Якщо дані прийшли, виводимо все як раніше
-    all_coins = df['symbol'].tolist()
-    target = st.selectbox("🎯 Оберіть пару", all_coins, index=all_coins.index("BTCUSDT") if "BTCUSDT" in all_coins else 0)
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown(f"""
-            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark" 
-                    width="100%" height="550" frameborder="0"></iframe>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.subheader("🚀 Топ")
-        st.write(df.sort_values('priceChangePercent', ascending=False).head(10)[['symbol', 'priceChangePercent']])
+# Спробуємо отримати дані для таблиці
+df = fetch_data_ultra_safe()
 
+# --- ОСНОВНА ПАНЕЛЬ ---
+if df is not None:
+    st.success("✅ Зв'язок з Binance встановлено! Всі 200+ індикаторів та монет доступні.")
+    all_symbols = df['symbol'].tolist()
+    target = st.selectbox("🎯 Оберіть монету зі списку", all_symbols, index=all_symbols.index("BTCUSDT") if "BTCUSDT" in all_symbols else 0)
 else:
-    # Якщо бан висить, даємо пряме посилання на графік, щоб юзер міг працювати
-    st.error("🚫 Binance все ще блокує запити від Streamlit Cloud.")
-    st.info("Але графік нижче ПРАЦЮЄ (він вантажиться напряму з TradingView):")
-    
-    manual_coin = st.text_input("Введіть тикер вручну для графіка (напр. BTCUSDT)", "BTCUSDT").upper()
-    st.markdown(f"""
-        <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{manual_coin}&interval=15&theme=dark" 
-                width="100%" height="600" frameborder="0"></iframe>
-    """, unsafe_allow_html=True)
-    
-    st.warning("Спробуйте оновити сторінку через 5 хвилин або зробіть 'Reboot App' у налаштуваннях.")
+    st.warning("⚠️ API Binance тимчасово недоступне. Працюємо в режимі Watchlist.")
+    target = st.selectbox("🎯 Ваші монети", my_coins)
 
-time.sleep(60)
+# --- ГРАФІК (ЯКИЙ ЗАВЖДИ ПРАЦЮЄ) ---
+col_left, col_right = st.columns([4, 1])
+
+with col_left:
+    st.markdown(f"### 📈 Графік {target}")
+    # Повний функціонал TradingView: свічки, індикатори, малювання
+    st.markdown(f"""
+        <div style="height:650px;">
+            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark&style=1&timezone=Europe%2FKiev&withdateranges=true&hide_side_toolbar=false&details=true&hotlist=false&studies=[%22RSI@tv-basicstudies%22,%22MASimple@tv-basicstudies%22]" 
+                    width="100%" height="650" frameborder="0" allowfullscreen></iframe>
+        </div>
+    """, unsafe_allow_html=True)
+
+with col_right:
+    st.subheader("🧠 Психологія")
+    tips = [
+        "Не додавай до збиткової позиції.",
+        "Рівень — це зона, а не лінія.",
+        "Тренд — твій друг.",
+        "Забирай профіт частинами."
+    ]
+    st.info(random.choice(tips))
+    
+    if df is not None:
+        st.subheader("📊 Топ 24г")
+        top = df.sort_values('priceChangePercent', ascending=False).head(5)
+        st.table(top[['symbol', 'priceChangePercent']])
+
+# --- НИЖНЯ ПАНЕЛЬ (Кнопки швидкого доступу) ---
+st.markdown("---")
+st.subheader("🖱 Швидкий перехід")
+cols = st.columns(len(my_coins[:8])) # показуємо перші 8 з вашого списку
+for i, coin in enumerate(my_coins[:8]):
+    if cols[i].button(coin.replace("USDT", "")):
+        st.info(f"Натисніть на '{coin}' у випадаючому списку вище для оновлення графіка.")
+
+# Пауза перед оновленням, щоб не дратувати API
+time.sleep(120) 
 st.rerun()
