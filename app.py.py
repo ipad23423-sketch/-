@@ -4,78 +4,90 @@ import pandas as pd
 import time
 import random
 
-st.set_page_config(page_title="Crypto Intellect LITE Dihash", layout="wide")
+st.set_page_config(page_title="Ultimate Dihash LITE", layout="wide")
 
-# --- ФУНКЦІЯ АНАЛІЗУ СТАНКА ---
-def get_order_book_analysis(symbol):
-    url = f"https://api.binance.com/api/v3/depth"
+# Функція аналізу стакана з ротацією серверів
+def get_order_book_pro(symbol):
+    # Використовуємо різні шлюзи
+    gateways = [
+        f"https://api1.binance.com/api/v3/depth?symbol={symbol}&limit=100",
+        f"https://api2.binance.com/api/v3/depth?symbol={symbol}&limit=100",
+        f"https://api3.binance.com/api/v3/depth?symbol={symbol}&limit=100",
+        f"https://data-api.binance.vision/api/v3/depth?symbol={symbol}&limit=100"
+    ]
+    
+    url = random.choice(gateways)
     try:
-        res = requests.get(url, params={'symbol': symbol, 'limit': 100}, timeout=5)
+        # Додаємо випадковий хедер, щоб не пізнали в нас бота
+        headers = {'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) {random.random()}'}
+        res = requests.get(url, headers=headers, timeout=5)
+        
         if res.status_code == 200:
             data = res.json()
             bids = pd.DataFrame(data['bids'], columns=['price', 'qty']).astype(float)
             asks = pd.DataFrame(data['asks'], columns=['price', 'qty']).astype(float)
-            
-            # Шукаємо стінки (ордери, що в 3 рази більші за середні)
-            avg_bid = bids['qty'].mean()
-            avg_ask = asks['qty'].mean()
-            
-            big_bids = bids[bids['qty'] > avg_bid * 3]
-            big_asks = asks[asks['qty'] > avg_ask * 3]
-            
-            return big_bids, big_asks
+            return bids, asks
         return None, None
     except:
         return None, None
 
-# --- САЙДБАР ---
-st.sidebar.title("🕵️‍♂️ Аналізатор Стінок")
-manual_list = st.sidebar.text_area("Список монет", "BTC,ETH,SOL,XRP,DOGE").upper().replace(" ", "")
+# --- ІНТЕРФЕЙС ---
+st.sidebar.title("🧱 Dihash Monitor")
+manual_list = st.sidebar.text_area("Мій список", "BTC,ETH,SOL,BNB,XRP").upper().replace(" ", "")
 my_coins = [c + "USDT" if not c.endswith("USDT") else c for c in manual_list.split(",")]
-target = st.sidebar.selectbox("🎯 Активна монета", my_coins)
+target = st.sidebar.selectbox("🎯 Актив для аналізу", my_coins)
 
-# --- ОСНОВНА ЧАСТИНА ---
-col_chart, col_orderbook = st.columns([3, 1])
+# Основна панель
+col_chart, col_data = st.columns([3, 1])
 
 with col_chart:
-    st.subheader(f"📊 Графік {target} (Pro Volume)")
-    # TradingView з профілем об'єму та RSI
+    st.subheader(f"📊 Live Chart: {target}")
+    # Графік з вбудованим профілем об'єму (VPVR)
     st.markdown(f"""
-        <div style="height:600px;">
-            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark&style=1&timezone=Europe%2FKiev&withdateranges=true&hide_side_toolbar=false&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22,%22RSI@tv-basicstudies%22]" 
-                    width="100%" height="600" frameborder="0" allowfullscreen></iframe>
+        <div style="height:650px;">
+            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark&style=1&details=true&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22]" 
+                    width="100%" height="650" frameborder="0" allowfullscreen></iframe>
         </div>
     """, unsafe_allow_html=True)
 
-with col_orderbook:
-    st.subheader("🧱 Аналіз стінок (Dihash style)")
-    bids, asks = get_order_book_analysis(target)
+with col_data:
+    st.subheader("🧱 Великі лімітки")
+    
+    # Спроба отримати стакан
+    bids, asks = get_order_book_pro(target)
     
     if bids is not None and asks is not None:
-        st.write("📈 **Стінки зверху (Опір):**")
-        if not asks.empty:
-            for _, row in asks.head(5).iterrows():
-                st.error(f"Ціна: {row['price']} | Об'єм: {row['qty']:.2f}")
+        # Розрахунок аномальних об'ємів (як у Dihash)
+        # Стінкою вважаємо ордер, що більший за середній у 4 рази
+        wall_threshold_bid = bids['qty'].mean() * 4
+        wall_threshold_ask = asks['qty'].mean() * 4
+        
+        st.markdown("🔴 **Стінки Опору (Asks):**")
+        big_asks = asks[asks['qty'] > wall_threshold_ask].sort_values('qty', ascending=False)
+        if not big_asks.empty:
+            for _, row in big_asks.head(5).iterrows():
+                st.error(f"💲 {row['price']} | 🧱 {row['qty']:.1f}")
         else:
-            st.write("Великих стінок не знайдено")
-            
-        st.write("📉 **Стінки знизу (Підтримка):**")
-        if not bids.empty:
-            for _, row in bids.head(5).iterrows():
-                st.success(f"Ціна: {row['price']} | Об'єм: {row['qty']:.2f}")
-        else:
-            st.write("Великих стінок не знайдено")
-            
-        # Сила ринку
-        total_bids = bids['qty'].sum()
-        total_asks = asks['qty'].sum()
-        ratio = total_bids / (total_bids + total_asks)
-        st.write("---")
-        st.write(f"📊 **Сила покупців:** {ratio*100:.1f}%")
-        st.progress(ratio)
-    else:
-        st.warning("Не вдалося підключитися до ордербуку Binance.")
+            st.caption("Чисто (великих ліміток немає)")
 
-# Авто-оновлення аналізу стінок
-time.sleep(15)
+        st.markdown("🟢 **Стінки Підтримки (Bids):**")
+        big_bids = bids[bids['qty'] > wall_threshold_bid].sort_values('qty', ascending=False)
+        if not big_bids.empty:
+            for _, row in big_bids.head(5).iterrows():
+                st.success(f"💲 {row['price']} | 🧱 {row['qty']:.1f}")
+        else:
+            st.caption("Чисто (великих ліміток немає)")
+
+        # Market Power
+        st.markdown("---")
+        power = bids['qty'].sum() / (bids['qty'].sum() + asks['qty'].sum())
+        st.write(f"⚖️ Сила стакана: **{power*100:.1f}%**")
+        st.progress(power)
+        
+    else:
+        st.error("🔌 Помилка шлюзу Binance.")
+        st.info("Binance часто блокує хмарні сервери. Спробуйте змінити монету або зачекайте 10 секунд — скрипт змінить сервер автоматично.")
+
+# Авто-оновлення кожні 20 секунд
+time.sleep(20)
 st.rerun()
