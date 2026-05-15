@@ -88,6 +88,19 @@ while True:
         filtered_df = df[mask].sort_values(by="priceChangePercent", ascending=False)
 
         with placeholder.container():
+# Додаємо вибір монети для графіка
+            selected_coin = st.selectbox("Виберіть монету для аналізу графіку", filtered_df['symbol'].tolist() if not filtered_df.empty else ["BTCUSDT"])
+
+            # Вставка графіка TradingView через HTML
+            st.markdown(f"""
+                <div style="height:500px;">
+                    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_76d4d&symbol=BINANCE:{selected_coin}&interval=15&hidesidetoolbar=1&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=[]&theme=dark&style=1&timezone=Europe%2FKiev" 
+                            width="100%" height="500" frameborder="0" allowfullscreen></iframe>
+                </div>
+            """, unsafe_allow_html=True)
+
+            if view_mode == "Таблиця":
+                # ... (тут залишається ваш старий код виводу таблиці)
             # Поради
             tips = ["Не торгуй на емоціях", "Дотримуйся ризик-менеджменту", "Щільність — це не гарантія розвороту"]
             st.info(f"🧠 Порада дня: {tips[int(time.time()%3)]}")
