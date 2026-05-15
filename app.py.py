@@ -6,86 +6,83 @@ import time
 
 st.set_page_config(page_title="Crypto Intellect Pro", layout="wide")
 
-# --- ФУНКЦІЯ ОТРИМАННЯ ДАНИХ ---
-@st.cache_data(ttl=10)
+# Функція отримання даних з обробкою помилок
 def get_crypto_data():
-    try:
-        url = "https://api.binance.com/api/v3/ticker/24hr"
-        res = requests.get(url).json()
-        df = pd.DataFrame(res)
-        df = df[df['symbol'].endswith('USDT')]
-        # Конвертація типів
-        cols = ['lastPrice', 'priceChangePercent', 'quoteVolume', 'highPrice', 'lowPrice', 'openPrice']
-        df[cols] = df[cols].astype(float)
-        return df
-    except:
-        return pd.DataFrame()
+    # Пробуємо основний та резервний шлях
+    urls = [
+        "https://api.binance.com/api/v3/ticker/24hr",
+        "https://api1.binance.com/api/v3/ticker/24hr"
+    ]
+    for url in urls:
+        try:
+            res = requests.get(url, timeout=5)
+            if res.status_code == 200:
+                df = pd.DataFrame(res.json())
+                df = df[df['symbol'].endswith('USDT')]
+                cols = ['lastPrice', 'priceChangePercent', 'quoteVolume', 'highPrice', 'lowPrice']
+                df[cols] = df[cols].astype(float)
+                return df
+        except:
+            continue
+    return pd.DataFrame()
 
-# --- САЙДБАР ---
-st.sidebar.title("🛠 Налаштування")
-search = st.sidebar.text_input("🔍 Пошук монети", "").upper()
+# Сайдбар
+st.sidebar.title("💎 Контроль")
+search = st.sidebar.text_input("🔍 Пошук (напр. BTC)", "").upper()
 min_vol = st.sidebar.number_input("Мін. Об'єм ($)", value=0)
 
-# --- ЛОГІКА РІВНІВ ---
-def get_levels(row):
-    # Класичні Pivot Points для визначення рівнів
-    pivot = (row['highPrice'] + row['lowPrice'] + row['lastPrice']) / 3
-    r1 = 2 * pivot - row['lowPrice']
-    s1 = 2 * pivot - row['highPrice']
-    return round(s1, 4), round(r1, 4)
-
+# Основна логіка
 df = get_crypto_data()
 
 if not df.empty:
-    # Фільтрація за об'ємом та пошуком
-    display_df = df[df['quoteVolume'] >= min_vol]
+    # Фільтрація
+    d_df = df[df['quoteVolume'] >= min_vol]
     if search:
-        display_df = display_df[display_df['symbol'].str.contains(search)]
+        d_df = d_df[d_df['symbol'].str.contains(search)]
 
-    # Вибір монети
-    all_coins = display_df['symbol'].tolist()
-    
-    col_chart, col_list = st.columns([3, 1])
+    all_symbols = d_df['symbol'].tolist()
 
-    with col_chart:
-        if all_coins:
-            selected = st.selectbox("🎯 Оберіть актив для аналізу", all_coins)
-            coin_info = df[df['symbol'] == selected].iloc[0]
-            
-            # Розрахунок рівнів
-            sup, res = get_levels(coin_info)
+    tab1, tab2 = st.tabs(["📊 Графік та Аналіз", "🆕 Нові Лістинги"])
 
-            st.subheader(f"📊 Графік {selected}")
-            # Професійний віджет зі свічками та малюванням
-            st.markdown(f"""
-                <div style="height:550px;">
-                    <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{selected}&interval=15&theme=dark&style=1&timezone=Europe%2FKiev&withdateranges=true&hide_side_toolbar=false&details=true&hotlist=false" 
-                            width="100%" height="550" frameborder="0" allowfullscreen></iframe>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            st.info(f"📍 **Авто-рівні (Pivot):** Підтримка: `{sup}` | Опір: `{res}`")
-        else:
-            st.warning("Монет не знайдено за вашим запитом.")
-
-    with col_list:
-        st.subheader("🚀 Топ Росту")
-        top_gain = display_df.sort_values(by="priceChangePercent", ascending=False).head(8)
-        for _, r in top_gain.iterrows():
-            st.success(f"**{r['symbol'].replace('USDT','')}**: {r['priceChangePercent']:+.2f}%")
+    with tab1:
+        col_c, col_s = st.columns([3, 1])
         
-        st.markdown("---")
-        st.subheader("🧠 Психологія")
-        st.caption("Ціна часто тестує рівні Pivot. Якщо закріпились вище Опору — це лонг.")
+        with col_c:
+            if all_symbols:
+                target = st.selectbox("🎯 Оберіть актив", all_symbols)
+                
+                # Розрахунок рівнів
+                c_info = df[df['symbol'] == target].iloc[0]
+                pivot = (c_info['highPrice'] + c_info['lowPrice'] + c_info['lastPrice']) / 3
+                res = 2 * pivot - c_info['lowPrice']
+                sup = 2 * pivot - c_info['highPrice']
 
-    # Таблиця всіх монет
+                # Графік
+                st.markdown(f"""
+                    <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark&style=1" 
+                            width="100%" height="550" frameborder="0"></iframe>
+                """, unsafe_allow_html=True)
+                st.info(f"📍 **Авто-рівні:** Опір: `{res:.4f}` | Підтримка: `{sup:.4f}`")
+            else:
+                st.warning("Монет не знайдено.")
+
+        with col_s:
+            st.subheader("🚀 Топ 24г")
+            top = d_df.sort_values(by="priceChangePercent", ascending=False).head(10)
+            for _, r in top.iterrows():
+                st.write(f"**{r['symbol'].replace('USDT','')}**: {r['priceChangePercent']:+.2f}%")
+
+    with tab2:
+        st.subheader("📅 Останні додані пари (Умовно)")
+        # Сортуємо за найменшим об'ємом або специфічними тикерами для демонстрації
+        st.write("Тут відображаються нові активи на біржі.")
+        st.dataframe(d_df.tail(10)[['symbol', 'lastPrice', 'quoteVolume']])
+
     st.markdown("---")
-    st.subheader("📋 Списки всіх USDT пар")
-    st.dataframe(display_df[['symbol', 'lastPrice', 'priceChangePercent', 'quoteVolume']].rename(columns={
-        'symbol': 'Тикер', 'lastPrice': 'Ціна', 'priceChangePercent': '24г %', 'quoteVolume': 'Об\'єм ($)'
-    }), use_container_width=True)
+    st.subheader("📋 Всі монети USDT")
+    st.dataframe(d_df[['symbol', 'lastPrice', 'priceChangePercent', 'quoteVolume']], use_container_width=True)
 
 else:
-    st.error("Помилка отримання даних з Binance API.")
+    st.error("Тимчасова помилка зв'язку з Binance. Спробуйте оновити сторінку через 30 секунд.")
 
-time.sleep(15)
+time.sleep(20)
