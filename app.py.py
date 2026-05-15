@@ -3,87 +3,87 @@ import requests
 import pandas as pd
 import time
 
-st.set_page_config(page_title="PRO Terminal (Bybit Data)", layout="wide")
+st.set_page_config(page_title="PRO Terminal v3.6 (Resilient)", layout="wide")
 
-# --- ФУНКЦІЯ ОТРИМАННЯ ДАНИХ З BYBIT ---
-def get_bybit_data():
-    # Ендпоінт Bybit для ф'ючерсів (Linear Perpetual)
-    url = "https://api.bybit.com/v5/market/tickers?category=linear"
+# --- ФУНКЦІЯ ОТРИМАННЯ ДАНИХ З COINGECKO ---
+def get_coingecko_data():
+    # Отримуємо топ-150 монет за капіталізацією
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        'vs_currency': 'usd',
+        'order': 'market_cap_desc',
+        'per_page': 150,
+        'page': 1,
+        'sparkline': False
+    }
     try:
-        res = requests.get(url, timeout=10)
+        res = requests.get(url, params=params, timeout=10)
         if res.status_code == 200:
-            data = res.json()['result']['list']
-            df = pd.DataFrame(data)
-            # Фільтруємо тільки USDT пари
-            df = df[df['symbol'].str.endswith('USDT')]
-            
-            # Конвертуємо типи даних
-            cols = ['lastPrice', 'price24hPcnt', 'turnover24h', 'highPrice24h', 'lowPrice24h']
-            for col in cols:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # Рахуємо зміну у відсотках (Bybit дає в частках, напр. 0.02)
-            df['change_pct'] = df['price24hPcnt'] * 100
-            
-            # Форматуємо об'єм (turnover24h - це об'єм у USDT)
-            df['vol_display'] = df['turnover24h'].apply(
-                lambda x: f"{x/1e9:.2f}B$" if x >= 1e9 else f"{x/1e6:.1f}M$"
-            )
+            df = pd.DataFrame(res.json())
+            # Підганяємо назви під формат бірж
+            df['symbol_trade'] = df['symbol'].str.upper() + "USDT"
             return df
         return None
     except:
         return None
 
 # --- ІНТЕРФЕЙС ---
-st.sidebar.title("💎 Digash Bybit Edition")
-df = get_bybit_data()
+st.sidebar.title("💎 Global Crypto Monitor")
+df = get_coingecko_data()
 
 if df is not None and not df.empty:
-    # Сортування за об'ємом (як у Digash)
-    df_sorted = df.sort_values('turnover24h', ascending=False)
-    all_symbols = df_sorted['symbol'].tolist()
+    # Сортуємо за об'ємом торгів (total_volume)
+    df_sorted = df.sort_values('total_volume', ascending=False)
+    all_symbols = df_sorted['symbol_trade'].tolist()
     
-    target = st.sidebar.selectbox("🎯 Оберіть пару (Bybit List)", all_symbols, index=0)
-    coin = df[df['symbol'] == target].iloc[0]
+    target = st.sidebar.selectbox("🎯 Оберіть монету", all_symbols, index=0)
+    coin = df[df['symbol_trade'] == target].iloc[0]
 
-    # Верхня панель метрик
+    # Верхня панель метрик (Digash Style)
     m1, m2, m3, m4 = st.columns(4)
     with m1:
-        st.metric("Ціна", f"{coin['lastPrice']}", f"{coin['change_pct']:.2f}%")
+        st.metric("Ціна (USD)", f"${coin['current_price']}", f"{coin['price_change_percentage_24h']:.2f}%")
     with m2:
-        st.metric("Об'єм 24г", coin['vol_display'])
+        vol = coin['total_volume']
+        vol_str = f"{vol/1e9:.2f}B$" if vol >= 1e9 else f"{vol/1e6:.2f}M$"
+        st.metric("Об'єм 24г", vol_str)
     with m3:
-        # Розрахунок волатильності
-        volat = ((coin['highPrice24h'] - coin['lowPrice24h']) / coin['lowPrice24h']) * 100
-        st.metric("Волатильність", f"{volat:.2f}%")
+        st.metric("Market Cap Rank", f"#{coin['market_cap_rank']}")
     with m4:
-        st.metric("24h High/Low", f"{coin['highPrice24h']} / {coin['lowPrice24h']}")
+        st.metric("24h High/Low", f"${coin['high_24h']} / ${coin['low_24h']}")
 
     st.markdown("---")
 
-    # Графік та Таблиця
-    col_left, col_right = st.columns([2.5, 1.2])
+    # Основний блок: Графік та Таблиця
+    col_l, col_r = st.columns([2.5, 1.2])
 
-    with col_left:
-        # Використовуємо графік Binance через TradingView (він стабільний)
+    with col_l:
+        # Графік Binance (TradingView) - він ПРАЦЮЄ, бо йде через твій IP
         st.markdown(f"""
-            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}PERP&interval=60&theme=dark&style=1&details=true&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22]" 
-                    width="100%" height="650" frameborder="0" allowfullscreen></iframe>
+            <div style="height:650px;">
+                <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}PERP&interval=60&theme=dark&style=1&details=true&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22]" 
+                        width="100%" height="650" frameborder="0" allowfullscreen></iframe>
+            </div>
         """, unsafe_allow_html=True)
 
-    with col_right:
-        st.subheader("📊 Market List (Bybit)")
-        # Таблиця як у правій частині Digash
-        top_list = df_sorted[['symbol', 'vol_display', 'change_pct']].head(25)
+    with col_r:
+        st.subheader("📊 Top by Volume (Global)")
+        # Таблиця лідерів ринку
+        top_list = df_sorted[['symbol_trade', 'total_volume', 'price_change_percentage_24h']].head(20)
+        top_list['total_volume'] = top_list['total_volume'].apply(lambda x: f"{x/1e6:.1f}M$")
+        
         st.dataframe(
-            top_list.rename(columns={'symbol': 'Монета', 'vol_display': 'Об\'єм', 'change_pct': '%'}), 
+            top_list.rename(columns={'symbol_trade': 'Монета', 'total_volume': 'Об\'єм', 'price_change_percentage_24h': '%'}), 
             hide_index=True, use_container_width=True, height=600
         )
 else:
-    st.error("🔌 Навіть Bybit не відповідає. Спробуйте оновити сторінку через 10 секунд.")
-    time.sleep(10)
-    st.rerun()
+    # ОСТАННІЙ РУБІЖ: Якщо навіть агрегатор лежить, даємо чистий графік
+    st.error("📡 Проблеми зі зв'язком. Режим автономного графіка активований.")
+    manual = st.text_input("Введіть тикер вручну", "BTCUSDT").upper()
+    st.markdown(f"""
+        <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{manual}PERP&interval=60&theme=dark" 
+                width="100%" height="700" frameborder="0"></iframe>
+    """, unsafe_allow_html=True)
 
-# Оновлення даних кожні 30 секунд
-time.sleep(30)
+time.sleep(60)
 st.rerun()
