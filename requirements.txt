@@ -2,4 +2,5 @@ streamlit
 requests
 pandas
 plotly
-pandas-ta
+pandas_ta
+trendln
