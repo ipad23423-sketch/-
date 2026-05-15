@@ -2,39 +2,47 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
+import random
 
-# 1. Налаштування сторінки
-st.set_page_config(page_title="PRO Screener v2.5", layout="wide")
+st.set_page_config(page_title="PRO Screener v2.6", layout="wide")
 
-# 2. Функція отримання даних з захистом від помилок
+# Функція з ротацією посилань для обходу блокування
 def fetch_binance_data():
-    url = "https://api.binance.com/api/v3/ticker/24hr"
+    # Різні сервери Binance для стабільності
+    endpoints = [
+        "https://api1.binance.com/api/v3/ticker/24hr",
+        "https://api2.binance.com/api/v3/ticker/24hr",
+        "https://api3.binance.com/api/v3/ticker/24hr",
+        "https://api.binance.com/api/v3/ticker/24hr"
+    ]
+    # Вибираємо випадковий сервер
+    url = random.choice(endpoints)
+    
     try:
-        response = requests.get(url, timeout=10)
+        # Додаємо User-Agent, щоб виглядати як звичайний браузер
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=10)
+        
         if response.status_code == 200:
-            data = response.json()
-            df = pd.DataFrame(data)
-            # Фільтруємо лише USDT пари
+            df = pd.DataFrame(response.json())
             df = df[df['symbol'].endswith('USDT')]
-            # Конвертуємо числа
             cols = ['lastPrice', 'priceChangePercent', 'quoteVolume', 'highPrice', 'lowPrice']
             df[cols] = df[cols].astype(float)
             return df
-        else:
+        elif response.status_code == 429:
+            st.error("⚠️ Binance тимчасово обмежив доступ (Rate Limit).")
             return None
-    except:
+    except Exception as e:
         return None
 
-# 3. Інтерфейс сайдбару
+# --- ІНТЕРФЕЙС ---
 st.sidebar.title("💎 PRO Control")
-search_coin = st.sidebar.text_input("🔍 Пошук (напр. SOL)", "").upper()
+search_coin = st.sidebar.text_input("🔍 Пошук монети", "").upper()
 min_v = st.sidebar.number_input("Мін. Об'єм ($)", value=0)
 
-# 4. Основна логіка
 data_df = fetch_binance_data()
 
 if data_df is not None:
-    # Фільтрація
     filtered = data_df[data_df['quoteVolume'] >= min_v]
     if search_coin:
         filtered = filtered[filtered['symbol'].str.contains(search_coin)]
@@ -43,23 +51,21 @@ if data_df is not None:
 
     with col_main:
         if not filtered.empty:
-            # Вибір монети для графіка
-            all_list = filtered['symbol'].tolist()
-            picked = st.selectbox("🎯 Оберіть монету", all_list, index=0)
+            all_symbols = filtered['symbol'].tolist()
+            # Пріоритет на BTCUSDT
+            idx = all_symbols.index("BTCUSDT") if "BTCUSDT" in all_symbols else 0
+            picked = st.selectbox("🎯 Оберіть актив", all_symbols, index=idx)
             
-            # Розрахунок Pivot рівнів
-            c = filtered[filtered['symbol'] == picked].iloc[0]
+            c = data_df[data_df['symbol'] == picked].iloc[0]
             p = (c['highPrice'] + c['lowPrice'] + c['lastPrice']) / 3
-            res = (2 * p) - c['lowPrice']
-            sup = (2 * p) - c['highPrice']
+            res, sup = (2 * p) - c['lowPrice'], (2 * p) - c['highPrice']
 
-            # Віджет TradingView зі свічками та малюванням
             st.markdown(f"""
-                <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{picked}&interval=15&theme=dark&style=1&timezone=Europe%2FKiev&withdateranges=true&hide_side_toolbar=false" 
+                <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{picked}&interval=15&theme=dark&style=1" 
                         width="100%" height="550" frameborder="0"></iframe>
             """, unsafe_allow_html=True)
             
-            st.success(f"📍 **Рівні:** Опір: `{res:.4f}` | Підтримка: `{sup:.4f}`")
+            st.success(f"📍 **Pivot рівні:** Опір: `{res:.4f}` | Підтримка: `{sup:.4f}`")
         else:
             st.warning("Монет не знайдено.")
 
@@ -68,23 +74,15 @@ if data_df is not None:
         top10 = filtered.sort_values(by="priceChangePercent", ascending=False).head(10)
         for _, r in top10.iterrows():
             st.write(f"**{r['symbol'].replace('USDT','')}**: `{r['priceChangePercent']:+.2f}%`")
-        
-        st.markdown("---")
-        st.subheader("🧠 Психологія")
-        st.info("Не входи в позицію на 'хайпі'. Чекай ретесту рівня підтримки.")
 
-    # Повна таблиця знизу
     st.markdown("---")
-    st.subheader("📋 Всі USDT монети")
-    st.dataframe(filtered[['symbol', 'lastPrice', 'priceChangePercent', 'quoteVolume']].rename(columns={
-        'symbol': 'Тікер', 'lastPrice': 'Ціна', 'priceChangePercent': '24г %', 'quoteVolume': 'Об\'єм'
-    }), use_container_width=True)
+    st.dataframe(filtered[['symbol', 'lastPrice', 'priceChangePercent', 'quoteVolume']], use_container_width=True)
 
 else:
-    st.error("⚠️ Помилка зв'язку з Binance. Зачекайте 30 секунд, сайт оновиться сам.")
-    time.sleep(30)
+    st.warning("🔄 Перепідключення до Binance шлюзу... Зачекайте.")
+    time.sleep(10) # Менша пауза перед повтором
     st.rerun()
 
-# Авто-оновлення
-time.sleep(60)
+# Важливо: не роби оновлення частіше ніж раз на 30-60 секунд
+time.sleep(45)
 st.rerun()
