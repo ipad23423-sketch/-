@@ -25,40 +25,41 @@ def get_data():
     for coin in res:
         if coin['symbol'].endswith('USDT'):
             rows.append({
-...                 "Тикер": coin['symbol'].replace('USDT', ''),
-...                 "Ціна ($)": float(coin['lastPrice']),
-...                 "Зміна (%)": float(coin['priceChangePercent']),
-...                 "Об'єм ($)": float(coin['quoteVolume'])
-...             })
-...     return pd.DataFrame(rows)
-... 
-... # Основний цикл оновлення
-... placeholder = st.empty()
-... 
-... while True:
-...     df = get_data()
-...     
-...     
-...     # Фільтрація
-...     filtered_df = df[(df['Об'єм ($)'] >= min_vol) & (df['Зміна (%)'] >= min_chg)]
-...     filtered_df = filtered_df.sort_values(by="Зміна (%)", ascending=False)
-... 
-...     with placeholder.container():
-...         # Метрики
-...         col1, col2 = st.columns(2)
-...         col1.metric("Активів знайдено", len(filtered_df))
-...         col2.metric("Найбільший ріст", 
-...                   f"{filtered_df['Тикер'].iloc[0] if not filtered_df.empty else 'N/A'}", 
-...                   f"{filtered_df['Зміна (%)'].iloc[0] if not filtered_df.empty else 0}%")
-... 
-...         # Таблиця з підсвіткою
-...         st.dataframe(
-...             filtered_df.style.format({
-...                 "Ціна ($)": "{:.4f}",
-...                 "Зміна (%)": "{:+.2f}%",
-...                 "Об'єм ($)": "{:,.0f}"
-...             }).background_gradient(subset=["Зміна (%)"], cmap="RdYlGn"),
-...             height=600,
-...             use_container_width=True
-...         )
-...         
+                "Ticker": coin['symbol'].replace('USDT', ''),
+                "Price": float(coin['lastPrice']),
+                "Change": float(coin['priceChangePercent']),
+                "Volume": float(coin['quoteVolume'])
+            })
+    return pd.DataFrame(rows)
+
+# Основний цикл оновлення
+placeholder = st.empty()
+
+while True:
+    df = get_data()
+    
+    # Фільтрація (використовуємо англійські назви, щоб не було проблем з апострофом)
+    filtered_df = df[(df['Volume'] >= min_vol) & (df['Change'] >= min_chg)]
+    filtered_df = filtered_df.sort_values(by="Change", ascending=False)
+
+    with placeholder.container():
+        col1, col2 = st.columns(2)
+        col1.metric("Активів знайдено", len(filtered_df))
+        
+        # Відображення таблиці з перейменуванням стовпців для користувача
+        st.dataframe(
+            filtered_df.rename(columns={
+                "Ticker": "Тикер",
+                "Price": "Ціна ($)",
+                "Change": "Зміна (%)",
+                "Volume": "Об'єм ($)"
+            }).style.format({
+                "Ціна ($)": "{:.4f}",
+                "Зміна (%)": "{:+.2f}%",
+                "Об'єм ($)": "{:,.0f}"
+            }).background_gradient(subset=["Зміна (%)"], cmap="RdYlGn"),
+            height=600,
+            use_container_width=True
+        )
+        
+    time.sleep(refresh_rate)
