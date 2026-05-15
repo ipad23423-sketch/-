@@ -4,9 +4,24 @@ import pandas as pd
 import time
 import random
 
-st.set_page_config(page_title="Crypto Whale Hunter v3.0", layout="wide")
+st.set_page_config(page_title="Crypto Whale Hunter PRO", layout="wide")
 
-# --- ФУНКЦІЯ АНАЛІЗУ СТАНКА ---
+# --- ФУНКЦІЯ ОТРИМАННЯ ВСІХ Ф'ЮЧЕРСНИХ МОНЕТ ---
+@st.cache_data(ttl=3600) # Оновлюємо список монет раз на годину
+def get_futures_symbols():
+    url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+    try:
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            # Беремо тільки USDT пари, які знаходяться в трейдингу (TRADING)
+            symbols = [s['symbol'] for s in data['symbols'] if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING']
+            return sorted(symbols)
+        return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    except:
+        return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+# --- АНАЛІЗ СТАНКА ---
 def get_order_book(symbol):
     urls = [f"https://api1.binance.com/api/v3/depth?symbol={symbol}&limit=100",
             f"https://api2.binance.com/api/v3/depth?symbol={symbol}&limit=100"]
@@ -21,7 +36,7 @@ def get_order_book(symbol):
     except:
         return None, None
 
-# --- ФУНКЦІЯ ПОШУКУ КИТОВИХ УГОД ---
+# --- ПОШУК КИТОВИХ УГОД ---
 def get_whale_trades(symbol, threshold_usd=50000):
     url = f"https://api.binance.com/api/v3/trades?symbol={symbol}&limit=50"
     try:
@@ -31,8 +46,6 @@ def get_whale_trades(symbol, threshold_usd=50000):
             trades['price'] = trades['price'].astype(float)
             trades['qty'] = trades['qty'].astype(float)
             trades['usd_val'] = trades['price'] * trades['qty']
-            
-            # Фільтруємо лише великі угоди
             whales = trades[trades['usd_val'] >= threshold_usd].copy()
             whales['time'] = pd.to_datetime(whales['time'], unit='ms').dt.strftime('%H:%M:%S')
             return whales
@@ -41,27 +54,32 @@ def get_whale_trades(symbol, threshold_usd=50000):
         return pd.DataFrame()
 
 # --- САЙДБАР ---
-st.sidebar.title("🐳 Whale Hunter")
-manual_list = st.sidebar.text_area("Список монет", "BTC,ETH,SOL,BNB,XRP,DOGE").upper().replace(" ", "")
-my_coins = [c + "USDT" if not c.endswith("USDT") else c for c in manual_list.split(",")]
-target = st.sidebar.selectbox("🎯 Активна монета", my_coins)
+st.sidebar.title("🐳 Whale Hunter PRO")
+
+# Автоматичне завантаження всіх монет
+futures_list = get_futures_symbols()
+target = st.sidebar.selectbox("🎯 Оберіть ф'ючерсну пару", futures_list, index=futures_list.index("BTCUSDT") if "BTCUSDT" in futures_list else 0)
+
 whale_limit = st.sidebar.slider("Поріг кита ($)", 10000, 500000, 50000, step=10000)
+
+st.sidebar.markdown("---")
+st.sidebar.write(f"✅ Всього знайдено монет: {len(futures_list)}")
 
 # --- ОСНОВНА ПАНЕЛЬ ---
 col_chart, col_data = st.columns([2.5, 1.2])
 
 with col_chart:
-    st.subheader(f"📈 Аналіз {target}")
+    st.subheader(f"📈 LIVE: {target} (Futures)")
     st.markdown(f"""
-        <div style="height:600px;">
-            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark&style=1&details=true&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22]" 
-                    width="100%" height="600" frameborder="0" allowfullscreen></iframe>
+        <div style="height:650px;">
+            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}PERP&interval=15&theme=dark&style=1&details=true&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22]" 
+                    width="100%" height="650" frameborder="0" allowfullscreen></iframe>
         </div>
     """, unsafe_allow_html=True)
 
 with col_data:
-    # БЛОК СТАНКА (Стінки)
-    st.subheader("🧱 Стінки (Order Book)")
+    # БЛОК СТАНКА
+    st.subheader("🧱 Стінки")
     bids, asks = get_order_book(target)
     if bids is not None:
         wall_b = bids['qty'].mean() * 4
@@ -69,15 +87,15 @@ with col_data:
         
         c1, c2 = st.columns(2)
         with c1:
-            st.caption("🟢 Підтримка")
+            st.caption("🟢 Support")
             st.dataframe(bids[bids['qty'] > wall_b].head(5)[['price', 'qty']], hide_index=True)
         with c2:
-            st.caption("🔴 Опір")
+            st.caption("🔴 Resistance")
             st.dataframe(asks[asks['qty'] > wall_a].head(5)[['price', 'qty']], hide_index=True)
     
     st.markdown("---")
     
-    # БЛОК КИТІВ (Whale Trades)
+    # БЛОК КИТІВ
     st.subheader("🐋 Стрічка китів")
     whale_trades = get_whale_trades(target, whale_limit)
     
@@ -87,8 +105,8 @@ with col_data:
             color = "green" if side == "🟢 BUY" else "red"
             st.markdown(f"**{trade['time']}** | <span style='color:{color}'>{side}</span> | **${trade['usd_val']:,.0f}**", unsafe_allow_html=True)
     else:
-        st.write("Сьогодні кити тихі... Великих угод не знайдено.")
+        st.caption("Великих угод поки немає...")
 
-# Авто-оновлення кожні 15 секунд
-time.sleep(15)
+# Авто-оновлення
+time.sleep(20)
 st.rerun()
