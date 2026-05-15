@@ -4,24 +4,14 @@ import pandas as pd
 import time
 import random
 
-st.set_page_config(page_title="Ultimate Dihash LITE", layout="wide")
+st.set_page_config(page_title="Crypto Whale Hunter v3.0", layout="wide")
 
-# Функція аналізу стакана з ротацією серверів
-def get_order_book_pro(symbol):
-    # Використовуємо різні шлюзи
-    gateways = [
-        f"https://api1.binance.com/api/v3/depth?symbol={symbol}&limit=100",
-        f"https://api2.binance.com/api/v3/depth?symbol={symbol}&limit=100",
-        f"https://api3.binance.com/api/v3/depth?symbol={symbol}&limit=100",
-        f"https://data-api.binance.vision/api/v3/depth?symbol={symbol}&limit=100"
-    ]
-    
-    url = random.choice(gateways)
+# --- ФУНКЦІЯ АНАЛІЗУ СТАНКА ---
+def get_order_book(symbol):
+    urls = [f"https://api1.binance.com/api/v3/depth?symbol={symbol}&limit=100",
+            f"https://api2.binance.com/api/v3/depth?symbol={symbol}&limit=100"]
     try:
-        # Додаємо випадковий хедер, щоб не пізнали в нас бота
-        headers = {'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) {random.random()}'}
-        res = requests.get(url, headers=headers, timeout=5)
-        
+        res = requests.get(random.choice(urls), timeout=5)
         if res.status_code == 200:
             data = res.json()
             bids = pd.DataFrame(data['bids'], columns=['price', 'qty']).astype(float)
@@ -31,63 +21,74 @@ def get_order_book_pro(symbol):
     except:
         return None, None
 
-# --- ІНТЕРФЕЙС ---
-st.sidebar.title("🧱 Dihash Monitor")
-manual_list = st.sidebar.text_area("Мій список", "BTC,ETH,SOL,BNB,XRP").upper().replace(" ", "")
-my_coins = [c + "USDT" if not c.endswith("USDT") else c for c in manual_list.split(",")]
-target = st.sidebar.selectbox("🎯 Актив для аналізу", my_coins)
+# --- ФУНКЦІЯ ПОШУКУ КИТОВИХ УГОД ---
+def get_whale_trades(symbol, threshold_usd=50000):
+    url = f"https://api.binance.com/api/v3/trades?symbol={symbol}&limit=50"
+    try:
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            trades = pd.DataFrame(res.json())
+            trades['price'] = trades['price'].astype(float)
+            trades['qty'] = trades['qty'].astype(float)
+            trades['usd_val'] = trades['price'] * trades['qty']
+            
+            # Фільтруємо лише великі угоди
+            whales = trades[trades['usd_val'] >= threshold_usd].copy()
+            whales['time'] = pd.to_datetime(whales['time'], unit='ms').dt.strftime('%H:%M:%S')
+            return whales
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
-# Основна панель
-col_chart, col_data = st.columns([3, 1])
+# --- САЙДБАР ---
+st.sidebar.title("🐳 Whale Hunter")
+manual_list = st.sidebar.text_area("Список монет", "BTC,ETH,SOL,BNB,XRP,DOGE").upper().replace(" ", "")
+my_coins = [c + "USDT" if not c.endswith("USDT") else c for c in manual_list.split(",")]
+target = st.sidebar.selectbox("🎯 Активна монета", my_coins)
+whale_limit = st.sidebar.slider("Поріг кита ($)", 10000, 500000, 50000, step=10000)
+
+# --- ОСНОВНА ПАНЕЛЬ ---
+col_chart, col_data = st.columns([2.5, 1.2])
 
 with col_chart:
-    st.subheader(f"📊 Live Chart: {target}")
-    # Графік з вбудованим профілем об'єму (VPVR)
+    st.subheader(f"📈 Аналіз {target}")
     st.markdown(f"""
-        <div style="height:650px;">
+        <div style="height:600px;">
             <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark&style=1&details=true&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22]" 
-                    width="100%" height="650" frameborder="0" allowfullscreen></iframe>
+                    width="100%" height="600" frameborder="0" allowfullscreen></iframe>
         </div>
     """, unsafe_allow_html=True)
 
 with col_data:
-    st.subheader("🧱 Великі лімітки")
-    
-    # Спроба отримати стакан
-    bids, asks = get_order_book_pro(target)
-    
-    if bids is not None and asks is not None:
-        # Розрахунок аномальних об'ємів (як у Dihash)
-        # Стінкою вважаємо ордер, що більший за середній у 4 рази
-        wall_threshold_bid = bids['qty'].mean() * 4
-        wall_threshold_ask = asks['qty'].mean() * 4
+    # БЛОК СТАНКА (Стінки)
+    st.subheader("🧱 Стінки (Order Book)")
+    bids, asks = get_order_book(target)
+    if bids is not None:
+        wall_b = bids['qty'].mean() * 4
+        wall_a = asks['qty'].mean() * 4
         
-        st.markdown("🔴 **Стінки Опору (Asks):**")
-        big_asks = asks[asks['qty'] > wall_threshold_ask].sort_values('qty', ascending=False)
-        if not big_asks.empty:
-            for _, row in big_asks.head(5).iterrows():
-                st.error(f"💲 {row['price']} | 🧱 {row['qty']:.1f}")
-        else:
-            st.caption("Чисто (великих ліміток немає)")
-
-        st.markdown("🟢 **Стінки Підтримки (Bids):**")
-        big_bids = bids[bids['qty'] > wall_threshold_bid].sort_values('qty', ascending=False)
-        if not big_bids.empty:
-            for _, row in big_bids.head(5).iterrows():
-                st.success(f"💲 {row['price']} | 🧱 {row['qty']:.1f}")
-        else:
-            st.caption("Чисто (великих ліміток немає)")
-
-        # Market Power
-        st.markdown("---")
-        power = bids['qty'].sum() / (bids['qty'].sum() + asks['qty'].sum())
-        st.write(f"⚖️ Сила стакана: **{power*100:.1f}%**")
-        st.progress(power)
-        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.caption("🟢 Підтримка")
+            st.dataframe(bids[bids['qty'] > wall_b].head(5)[['price', 'qty']], hide_index=True)
+        with c2:
+            st.caption("🔴 Опір")
+            st.dataframe(asks[asks['qty'] > wall_a].head(5)[['price', 'qty']], hide_index=True)
+    
+    st.markdown("---")
+    
+    # БЛОК КИТІВ (Whale Trades)
+    st.subheader("🐋 Стрічка китів")
+    whale_trades = get_whale_trades(target, whale_limit)
+    
+    if not whale_trades.empty:
+        for _, trade in whale_trades.iterrows():
+            side = "🟢 BUY" if not trade['isBuyerMaker'] else "🔴 SELL"
+            color = "green" if side == "🟢 BUY" else "red"
+            st.markdown(f"**{trade['time']}** | <span style='color:{color}'>{side}</span> | **${trade['usd_val']:,.0f}**", unsafe_allow_html=True)
     else:
-        st.error("🔌 Помилка шлюзу Binance.")
-        st.info("Binance часто блокує хмарні сервери. Спробуйте змінити монету або зачекайте 10 секунд — скрипт змінить сервер автоматично.")
+        st.write("Сьогодні кити тихі... Великих угод не знайдено.")
 
-# Авто-оновлення кожні 20 секунд
-time.sleep(20)
+# Авто-оновлення кожні 15 секунд
+time.sleep(15)
 st.rerun()
