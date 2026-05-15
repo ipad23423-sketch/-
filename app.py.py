@@ -4,78 +4,78 @@ import pandas as pd
 import time
 import random
 
-st.set_page_config(page_title="Crypto Intellect Ultimate", layout="wide")
+st.set_page_config(page_title="Crypto Intellect LITE Dihash", layout="wide")
 
-# Функція з "м'яким" запитом
-def fetch_data_ultra_safe():
-    urls = ["https://api1.binance.com/api/v3/ticker/24hr", "https://api2.binance.com/api/v3/ticker/24hr"]
+# --- ФУНКЦІЯ АНАЛІЗУ СТАНКА ---
+def get_order_book_analysis(symbol):
+    url = f"https://api.binance.com/api/v3/depth"
     try:
-        # Додаємо випадковий хеш, щоб запит не кешувався
-        r = requests.get(random.choice(urls), params={'refresh': random.random()}, timeout=10)
-        if r.status_code == 200:
-            df = pd.DataFrame(r.json())
-            df = df[df['symbol'].endswith('USDT')]
-            return df
-        return None
+        res = requests.get(url, params={'symbol': symbol, 'limit': 100}, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            bids = pd.DataFrame(data['bids'], columns=['price', 'qty']).astype(float)
+            asks = pd.DataFrame(data['asks'], columns=['price', 'qty']).astype(float)
+            
+            # Шукаємо стінки (ордери, що в 3 рази більші за середні)
+            avg_bid = bids['qty'].mean()
+            avg_ask = asks['qty'].mean()
+            
+            big_bids = bids[bids['qty'] > avg_bid * 3]
+            big_asks = asks[asks['qty'] > avg_ask * 3]
+            
+            return big_bids, big_asks
+        return None, None
     except:
-        return None
+        return None, None
 
 # --- САЙДБАР ---
-st.sidebar.title("🚀 Налаштування PRO")
-
-# Ручне введення монет (якщо API лежить)
-st.sidebar.subheader("📋 Мій Список (Watchlist)")
-manual_list = st.sidebar.text_area("Введіть тикери через кому", "BTC,ETH,SOL,XRP,DOGE,PEPE").upper().replace(" ", "")
+st.sidebar.title("🕵️‍♂️ Аналізатор Стінок")
+manual_list = st.sidebar.text_area("Список монет", "BTC,ETH,SOL,XRP,DOGE").upper().replace(" ", "")
 my_coins = [c + "USDT" if not c.endswith("USDT") else c for c in manual_list.split(",")]
+target = st.sidebar.selectbox("🎯 Активна монета", my_coins)
 
-# Спробуємо отримати дані для таблиці
-df = fetch_data_ultra_safe()
+# --- ОСНОВНА ЧАСТИНА ---
+col_chart, col_orderbook = st.columns([3, 1])
 
-# --- ОСНОВНА ПАНЕЛЬ ---
-if df is not None:
-    st.success("✅ Зв'язок з Binance встановлено! Всі 200+ індикаторів та монет доступні.")
-    all_symbols = df['symbol'].tolist()
-    target = st.selectbox("🎯 Оберіть монету зі списку", all_symbols, index=all_symbols.index("BTCUSDT") if "BTCUSDT" in all_symbols else 0)
-else:
-    st.warning("⚠️ API Binance тимчасово недоступне. Працюємо в режимі Watchlist.")
-    target = st.selectbox("🎯 Ваші монети", my_coins)
-
-# --- ГРАФІК (ЯКИЙ ЗАВЖДИ ПРАЦЮЄ) ---
-col_left, col_right = st.columns([4, 1])
-
-with col_left:
-    st.markdown(f"### 📈 Графік {target}")
-    # Повний функціонал TradingView: свічки, індикатори, малювання
+with col_chart:
+    st.subheader(f"📊 Графік {target} (Pro Volume)")
+    # TradingView з профілем об'єму та RSI
     st.markdown(f"""
-        <div style="height:650px;">
-            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark&style=1&timezone=Europe%2FKiev&withdateranges=true&hide_side_toolbar=false&details=true&hotlist=false&studies=[%22RSI@tv-basicstudies%22,%22MASimple@tv-basicstudies%22]" 
-                    width="100%" height="650" frameborder="0" allowfullscreen></iframe>
+        <div style="height:600px;">
+            <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target}&interval=15&theme=dark&style=1&timezone=Europe%2FKiev&withdateranges=true&hide_side_toolbar=false&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22,%22RSI@tv-basicstudies%22]" 
+                    width="100%" height="600" frameborder="0" allowfullscreen></iframe>
         </div>
     """, unsafe_allow_html=True)
 
-with col_right:
-    st.subheader("🧠 Психологія")
-    tips = [
-        "Не додавай до збиткової позиції.",
-        "Рівень — це зона, а не лінія.",
-        "Тренд — твій друг.",
-        "Забирай профіт частинами."
-    ]
-    st.info(random.choice(tips))
+with col_orderbook:
+    st.subheader("🧱 Аналіз стінок (Dihash style)")
+    bids, asks = get_order_book_analysis(target)
     
-    if df is not None:
-        st.subheader("📊 Топ 24г")
-        top = df.sort_values('priceChangePercent', ascending=False).head(5)
-        st.table(top[['symbol', 'priceChangePercent']])
+    if bids is not None and asks is not None:
+        st.write("📈 **Стінки зверху (Опір):**")
+        if not asks.empty:
+            for _, row in asks.head(5).iterrows():
+                st.error(f"Ціна: {row['price']} | Об'єм: {row['qty']:.2f}")
+        else:
+            st.write("Великих стінок не знайдено")
+            
+        st.write("📉 **Стінки знизу (Підтримка):**")
+        if not bids.empty:
+            for _, row in bids.head(5).iterrows():
+                st.success(f"Ціна: {row['price']} | Об'єм: {row['qty']:.2f}")
+        else:
+            st.write("Великих стінок не знайдено")
+            
+        # Сила ринку
+        total_bids = bids['qty'].sum()
+        total_asks = asks['qty'].sum()
+        ratio = total_bids / (total_bids + total_asks)
+        st.write("---")
+        st.write(f"📊 **Сила покупців:** {ratio*100:.1f}%")
+        st.progress(ratio)
+    else:
+        st.warning("Не вдалося підключитися до ордербуку Binance.")
 
-# --- НИЖНЯ ПАНЕЛЬ (Кнопки швидкого доступу) ---
-st.markdown("---")
-st.subheader("🖱 Швидкий перехід")
-cols = st.columns(len(my_coins[:8])) # показуємо перші 8 з вашого списку
-for i, coin in enumerate(my_coins[:8]):
-    if cols[i].button(coin.replace("USDT", "")):
-        st.info(f"Натисніть на '{coin}' у випадаючому списку вище для оновлення графіка.")
-
-# Пауза перед оновленням, щоб не дратувати API
-time.sleep(120) 
+# Авто-оновлення аналізу стінок
+time.sleep(15)
 st.rerun()
