@@ -2,8 +2,9 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
+import plotly.graph_objects as go
 
-st.set_page_config(page_title="PRO Terminal v3.7", layout="wide")
+st.set_page_config(page_title="PRO Terminal + Scalp Levels", layout="wide")
 
 # --- ОТРИМАННЯ ДАНИХ (CoinGecko) ---
 def get_global_data():
@@ -13,63 +14,88 @@ def get_global_data():
         res = requests.get(url, params=params, timeout=10)
         if res.status_code == 200:
             df = pd.DataFrame(res.json())
-            # Виправляємо символ для графіка (напр. btc -> BTCUSDT)
             df['tv_symbol'] = df['symbol'].str.upper() + "USDT"
             return df
         return None
     except:
         return None
 
+# --- ЛОГІКА РІВНІВ (Pivot Points) ---
+def calculate_levels(coin_data):
+    # Використовуємо High, Low та Price для розрахунку рівнів Pivot
+    H = coin_data['high_24h']
+    L = coin_data['low_24h']
+    C = coin_data['current_price']
+    
+    pivot = (H + L + C) / 3
+    r1 = 2 * pivot - L
+    s1 = 2 * pivot - H
+    r2 = pivot + (H - L)
+    s2 = pivot - (H - L)
+    
+    return {
+        "R2 (Стіна 2)": r2, "R1 (Спротив)": r1,
+        "Pivot": pivot,
+        "S1 (Підтримка)": s1, "S2 (Стіна 2)": s2
+    }
+
 # --- ІНТЕРФЕЙС ---
-st.sidebar.title("💎 Global PRO Terminal")
+st.sidebar.title("💎 PRO Control")
 df = get_global_data()
 
 if df is not None and not df.empty:
-    # Сортуємо за об'ємом (як у Digash)
     df_sorted = df.sort_values('total_volume', ascending=False)
-    
-    # Вибір монети
     target_tv = st.sidebar.selectbox("🎯 Оберіть монету", df_sorted['tv_symbol'].tolist(), index=0)
     coin = df[df['tv_symbol'] == target_tv].iloc[0]
 
-    # Панель метрик
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.metric("Ціна", f"${coin['current_price']}", f"{coin['price_change_percentage_24h']:.2f}%")
-    with m2:
-        vol = coin['total_volume']
-        st.metric("Об'єм 24г", f"{vol/1e9:.2f}B$" if vol >= 1e9 else f"{vol/1e6:.2f}M$")
-    with m3:
-        volat = ((coin['high_24h'] - coin['low_24h']) / coin['low_24h']) * 100
-        st.metric("Волатильність", f"{volat:.2f}%")
-    with m4:
-        st.metric("Rank", f"#{coin['market_cap_rank']}")
+    # Вкладки
+    tab_main, tab_scalp = st.tabs(["📊 Головний термінал", "🎯 Scalp Levels (Рівні)"])
 
-    st.markdown("---")
+    with tab_main:
+        # Твоя основна сторінка як у Digash
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Ціна", f"${coin['current_price']}", f"{coin['price_change_percentage_24h']:.2f}%")
+        m2.metric("Об'єм 24г", f"{coin['total_volume']/1e6:.1f}M$")
+        
+        col_l, col_r = st.columns([2.5, 1.2])
+        with col_l:
+            st.markdown(f"""
+                <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target_tv}&interval=15&theme=dark&style=1" 
+                        width="100%" height="600" frameborder="0"></iframe>
+            """, unsafe_allow_html=True)
+        with col_r:
+            st.subheader("Топ об'ємів")
+            st.dataframe(df_sorted[['tv_symbol', 'total_volume']].head(15), hide_index=True)
 
-    # Графік та Таблиця
-    col_l, col_r = st.columns([2.5, 1.2])
+    with tab_scalp:
+        st.subheader(f"🎯 Авто-рівні для скальпінгу: {target_tv}")
+        levels = calculate_levels(coin)
+        
+        # Малюємо графік з рівнями
+        fig = go.Figure()
+        
+        # Поточна ціна
+        fig.add_trace(go.Scatter(x=[0, 1], y=[coin['current_price'], coin['current_price']], 
+                                 mode="lines+text", name="Поточна ціна", 
+                                 line=dict(color="white", width=4, dash="dot")))
+        
+        # Малюємо рівні
+        colors = {"R2": "red", "R1": "orange", "Pivot": "gray", "S1": "lightgreen", "S2": "green"}
+        for name, val in levels.items():
+            line_color = "red" if "R" in name else "green" if "S" in name else "gray"
+            fig.add_trace(go.Scatter(x=[0, 1], y=[val, val], mode="lines+text", 
+                                     text=[name], textposition="top right",
+                                     name=name, line=dict(color=line_color, width=2)))
 
-    with col_l:
-        # ТЕПЕР ТУТ ПРАВИЛЬНИЙ ТИКЕР
-        st.markdown(f"""
-            <div style="height:650px;">
-                <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{target_tv}&interval=60&theme=dark&style=1&details=true&studies=[%22Volume@tv-basicstudies%22,%22VbPFixed@tv-basicstudies%22]" 
-                        width="100%" height="650" frameborder="0" allowfullscreen></iframe>
-            </div>
-        """, unsafe_allow_html=True)
+        fig.update_layout(height=600, template="plotly_dark", showlegend=False,
+                          yaxis_title="Ціна USD", xaxis_visible=False)
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.info("💡 Рівні розраховані на основі волатильності за останні 24 години. R1/R2 — зони для фіксації лонгів або пошуку шортів. S1/S2 — зони для покупок.")
 
-    with col_r:
-        st.subheader("📊 Market Leaders")
-        top_list = df_sorted[['tv_symbol', 'total_volume', 'price_change_percentage_24h']].head(25)
-        # Форматуємо для красивої таблиці
-        top_list['total_volume'] = top_list['total_volume'].apply(lambda x: f"{x/1e6:.1f}M$")
-        st.dataframe(
-            top_list.rename(columns={'tv_symbol': 'Монета', 'total_volume': 'Об\'єм', 'price_change_percentage_24h': '%'}), 
-            hide_index=True, use_container_width=True, height=600
-        )
 else:
-    st.error("Помилка зв'язку. Спробуйте оновити сторінку через 30 секунд.")
+    st.error("Помилка отримання даних.")
 
 time.sleep(60)
 st.rerun()
