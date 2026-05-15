@@ -1,118 +1,91 @@
 import streamlit as st
 import requests
 import pandas as pd
-import numpy as np
+import pandas_ta as ta
 import time
 
-st.set_page_config(page_title="Crypto Pro Screener", layout="wide")
+st.set_page_config(page_title="Crypto AI Screener Pro", layout="wide", initial_sidebar_state="expanded")
 
-# --- СТИЛІЗАЦІЯ ---
-st.markdown("""
-    <style>
-    .metric-card {
-        background-color: #1e2130;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #3e4251;
-        margin-bottom: 10px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- ФУНКЦІЇ ДАНИХ ---
-@st.cache_data(ttl=5)
-def get_all_data():
+# --- ФУНКЦІЯ ОТРИМАННЯ ДАНИХ ---
+@st.cache_data(ttl=10)
+def get_all_pairs():
     url = "https://api.binance.com/api/v3/ticker/24hr"
     try:
-        res = requests.get(url).json()
-        df = pd.DataFrame(res)
+        data = requests.get(url).json()
+        df = pd.DataFrame(data)
         df = df[df['symbol'].endswith('USDT')]
-        df['lastPrice'] = df['lastPrice'].astype(float)
-        df['priceChangePercent'] = df['priceChangePercent'].astype(float)
-        df['quoteVolume'] = df['quoteVolume'].astype(float)
+        # Чистимо назви від USDT для зручності
+        df['coin'] = df['symbol'].str.replace('USDT', '')
+        cols_to_fix = ['lastPrice', 'priceChangePercent', 'quoteVolume', 'highPrice', 'lowPrice']
+        df[cols_to_fix] = df[cols_to_fix].astype(float)
         return df
     except:
         return pd.DataFrame()
 
-def calculate_correlation(df):
-    try:
-        btc_row = df[df['symbol'] == 'BTCUSDT']
-        if not btc_row.empty:
-            btc_change = btc_row['priceChangePercent'].values[0]
-            df['Correlation'] = df['priceChangePercent'].apply(lambda x: round(x / btc_change if btc_change != 0 else 0, 2))
+# --- САЙДБАР ---
+st.sidebar.title("💎 PRO Control Panel")
+search_coin = st.sidebar.text_input("🔍 Швидкий пошук монети", "").upper()
+
+vol_min = st.sidebar.number_input("Мін. Об'єм ($)", value=0)
+chg_filter = st.sidebar.slider("Зміна ціни (%)", -30.0, 30.0, (-30.0, 30.0))
+
+# --- ОСНОВНИЙ БЛОК ---
+df = get_all_pairs()
+
+if not df.empty:
+    # Фільтрація
+    filtered_df = df[(df['quoteVolume'] >= vol_min) & 
+                    (df['priceChangePercent'] >= chg_filter[0]) & 
+                    (df['priceChangePercent'] <= chg_filter[1])]
+    
+    if search_coin:
+        filtered_df = filtered_df[filtered_df['coin'].str.contains(search_coin)]
+
+    # Вибір монети
+    coin_list = filtered_df['symbol'].tolist()
+    
+    col_main, col_side = st.columns([3, 1])
+
+    with col_main:
+        if coin_list:
+            selected_symbol = st.selectbox("🎯 Оберіть монету для аналізу та рівнів", coin_list)
+            
+            # Розрахунок рівнів (спрощений Pivot Points)
+            coin_data = df[df['symbol'] == selected_symbol].iloc[0]
+            r1 = round(coin_data['lastPrice'] * 1.02, 4) # Опір +2%
+            s1 = round(coin_data['lastPrice'] * 0.98, 4) # Підтримка -2%
+            
+            st.subheader(f"📊 Графік {selected_symbol}")
+            
+            # Вставка графіка TradingView (Свічки + Інструменти)
+            st.markdown(f"""
+                <div style="height:600px;">
+                    <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{selected_symbol}&interval=15&theme=dark&style=1&timezone=Europe%2FKiev&withdateranges=true&hide_side_toolbar=false&details=true&hotlist=true&calendar=true" 
+                            width="100%" height="600" frameborder="0" allowfullscreen></iframe>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.write(f"📍 **Авто-рівні (найближчі):** Опір: `{r1}` | Підтримка: `{s1}`")
         else:
-            df['Correlation'] = 0.0
-        return df
-    except:
-        df['Correlation'] = 0.0
-        return df
+            st.error("Монет не знайдено. Скиньте фільтри.")
 
-# --- САЙДБАР (ФІЛЬТРИ) ---
-st.sidebar.title("🛠 Налаштування PRO")
-view_mode = st.sidebar.radio("Режим перегляду", ["Таблиця", "Сітка монет"])
-
-vol_options = [0, 100000, 1000000, 5000000, 10000000, 50000000, 100000000, 500000000, 1000000000]
-vol_min, vol_max = st.sidebar.select_slider(
-    "Фільтр об'єму ($)",
-    options=vol_options,
-    value=(0, 1000000000), # Поставив 0 за замовчуванням, щоб монети точно були
-    format_func=lambda x: f"{x/1e6:.1f}M" if x >= 1e6 else f"{x/1000:.0f}k" if x > 0 else "0"
-)
-
-chg_range = st.sidebar.slider("Зміна ціни (%)", -30.0, 30.0, (-15.0, 15.0))
-corr_filter = st.sidebar.slider("Кореляція до BTC", -2.0, 2.0, (-2.0, 2.0))
-watchlist = st.sidebar.multiselect("Вибрані монети", ["BTC", "ETH", "SOL", "XRP", "BNB"])
-
-# --- ОСНОВНА ЛОГІКА ---
-st.title("📊 Crypto Intellect Screener")
-
-placeholder = st.empty()
-
-while True:
-    raw_df = get_all_data()
-    if not raw_df.empty:
-        df = calculate_correlation(raw_df)
+    with col_side:
+        st.subheader("🔥 Top Gainers")
+        top_df = filtered_df.sort_values(by="priceChangePercent", ascending=False).head(10)
+        for _, row in top_df.iterrows():
+            st.success(f"**{row['coin']}**: {row['priceChangePercent']:+.2f}%")
         
-        # Фільтрація
-        mask = (df['quoteVolume'] >= vol_min) & (df['quoteVolume'] <= vol_max) & \
-               (df['priceChangePercent'] >= chg_range[0]) & (df['priceChangePercent'] <= chg_range[1]) & \
-               (df['Correlation'] >= corr_filter[0]) & (df['Correlation'] <= corr_filter[1])
-        
-        if watchlist:
-            mask = mask & (df['symbol'].str.replace('USDT','').isin(watchlist))
-        
-        filtered_df = df[mask].sort_values(by="priceChangePercent", ascending=False)
+        st.subheader("💡 Психологія")
+        st.caption("Рівні — це зони, де товпа приймає рішення. Не поспішай входити перед рівнем, чекай реакції.")
 
-        with placeholder.container():
-            # 🧠 Поради
-            tips = ["Не торгуй на емоціях", "Дотримуйся ризик-менеджменту", "Щільність — це не гарантія розвороту"]
-            st.info(f"🧠 Порада дня: {tips[int(time.time()%3)]}")
+    # Таблиця внизу
+    st.markdown("---")
+    st.subheader("📋 Всі доступні пари (USDT)")
+    st.dataframe(filtered_df[['coin', 'lastPrice', 'priceChangePercent', 'quoteVolume']].rename(columns={
+        'coin': 'Монета', 'lastPrice': 'Ціна', 'priceChangePercent': '24h %', 'quoteVolume': 'Об\'єм'
+    }), use_container_width=True)
 
-            if not filtered_df.empty:
-                # 📈 ГРАФІК ТРАНСЛЯЦІЯ
-                selected_coin = st.selectbox("Виберіть монету для графіку", filtered_df['symbol'].tolist())
-                st.markdown(f"""
-                    <iframe src="https://s.tradingview.com/widgetembed/?symbol=BINANCE:{selected_coin}&interval=15&theme=dark" 
-                            width="100%" height="450" frameborder="0"></iframe>
-                """, unsafe_allow_html=True)
-
-                if view_mode == "Таблиця":
-                    st.dataframe(filtered_df[['symbol', 'lastPrice', 'priceChangePercent', 'quoteVolume', 'Correlation']].rename(columns={
-                        'symbol': 'Тикер', 'lastPrice': 'Ціна', 'priceChangePercent': 'Зміна %', 'quoteVolume': 'Об\'єм', 'Correlation': 'Корел. BTC'
-                    }).style.format({
-                        'Ціна': '{:.4f}', 'Зміна %': '{:+.2f}%', 'Об\'єм': '{:,.0f}', 'Корел. BTC': '{:.2f}'
-                    }).background_gradient(subset=['Зміна %'], cmap='RdYlGn'), use_container_width=True)
-                else:
-                    cols = st.columns(4)
-                    for i, (_, row) in enumerate(filtered_df.iterrows()):
-                        with cols[i % 4]:
-                            color = "#22c55e" if row['priceChangePercent'] > 0 else "#ef4444"
-                            st.markdown(f"""<div class="metric-card">
-                                <h4>{row['symbol'].replace('USDT','')}</h4>
-                                <h2 style="color:{color}">{row['priceChangePercent']:+.2f}%</h2>
-                                <p>Ціна: {row['lastPrice']:.4f}<br>V: {row['quoteVolume']/1e6:.1f}M</p>
-                            </div>""", unsafe_allow_html=True)
-            else:
-                st.warning("Нічого не знайдено. Спробуйте розширити фільтри в меню зліва.")
-
-    time.sleep(15)
+else:
+    st.warning("Завантаження даних з Binance...")
+    time.sleep(2)
+    st.rerun()
